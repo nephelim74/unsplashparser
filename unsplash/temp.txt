@@ -1,0 +1,113 @@
+файл unsplashimg.py:
+import scrapy
+from scrapy.http import HtmlResponse
+from unsplash.items import UnsplashItem
+from scrapy.loader import ItemLoader
+
+class UnsplashimgSpider(scrapy.Spider):
+    name = "unsplashimg"
+    allowed_domains = ["unsplash.com"]
+    start_urls = ["https://unsplash.com"]
+
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.start_urls = [f"https://unsplash.com/s/photos/{kwargs.get('query')}"]
+    def parse(self, response: HtmlResponse):
+        print()
+        photo_links = response.xpath('//a[@itemprop="contentUrl"]/@href')
+        for link in photo_links:
+            yield response.follow(link, self.parse_site)
+
+        pass
+
+файл items.pyЖ
+# Define here the models for your scraped items
+#
+# See documentation in:
+# https://docs.scrapy.org/en/latest/topics/items.html
+
+import scrapy
+from itemloaders.processors import TakeFirst,MapCompose,Compose
+from scrapy.utils.project import get_project_settings
+
+def process_text(value):
+    settings = get_project_settings()
+    if value:
+        value = value[0].strip()
+    elif not value:
+        value = 'no information available'
+    if value.startswith('/s/photos/'):
+        value = settings.get('START_URL') + value
+    return value
+def process_photo(value:str):
+    print()
+    if value.startswith('https'):
+        value = value.split()[0]
+        print(value)
+    elif value.startswith('data'):
+        value = None
+    else:
+        value = value.split()[1]
+    return value
+class UnsplashItem(scrapy.Item):
+    # define the fields for your item here like:
+    print()
+    name = scrapy.Field(input_processor=Compose(process_text), output_processor=TakeFirst())
+    country = scrapy.Field(input_processor=Compose(process_text), output_processor=TakeFirst())
+    date = scrapy.Field(input_processor=Compose(process_text), output_processor=TakeFirst())
+    url = scrapy.Field(output_processor=TakeFirst())
+    photos = scrapy.Field(input_processor=MapCompose(process_photo))
+    tag_title = scrapy.Field(input_processor=Compose(process_text), output_processor=TakeFirst())
+    tag_href = scrapy.Field(input_processor=Compose(process_text), output_processor=TakeFirst())
+    _id = scrapy.Field()
+    pass
+
+
+    def parse_site(self, response: HtmlResponse):
+        print()
+        loader = ItemLoader(item=UnsplashItem(), response=response)
+        loader.add_xpath('name', '//h1[@class="vev3s"]/text()')
+        loader.add_xpath('country', '//span[@class="IwfFI jhw7y dRzrK uoMSP"]/text()')
+        loader.add_xpath('date', '//time/@datetime')
+        loader.add_xpath('tag_title', '//div[@class="TQ1ci BOC6f"]/div[@class="zb0Hu atI7H"]//@title')
+        loader.add_xpath('tag_href', '//div[@class="TQ1ci BOC6f"]/div[@class="zb0Hu atI7H"]//@href')
+        loader.add_value('url', response.url)
+        loader.add_xpath('photos', "//img/@srcset | "
+                                                   "//img/@src")
+        # //div[@class="zb0Hu atI7H"]/a/@title
+
+        yield loader.load_item()
+
+файл pipelines.py:
+# Define your item pipelines here
+#
+# Don't forget to add your pipeline to the ITEM_PIPELINES setting
+# See: https://docs.scrapy.org/en/latest/topics/item-pipeline.html
+
+import scrapy
+# useful for handling different item types with a single interface
+from itemadapter import ItemAdapter
+from scrapy.pipelines.images import ImagesPipeline
+
+class UnsplashPipeline:
+    def process_item(self, item, spider):
+        print(f"Processed item: {item}")
+        return item
+
+class UnsplashPhotosPipeline(ImagesPipeline):
+    def get_media_requests(self, item, info):
+        if item['photos']:
+            for img_url in item['photos']:
+                try:
+                    yield scrapy.Request(img_url)
+                except Exception as e:
+                    print(e)
+    def item_completed(self, results, item, info):
+        print()
+        if results:
+            # result = []
+            # for itm in results:
+            #     result.append(itm[1])
+            item['photos'] = [itm[1] for itm in results if itm[0]]
+        return item
